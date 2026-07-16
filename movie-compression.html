@@ -2,7 +2,16 @@
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
-  <script src="coi-serviceworker.min.js"></script>
+  <script>
+  // Service Workerを登録し、分離環境が構築されていなければリロードする
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').then(() => {
+      if (!window.crossOriginIsolated) {
+        window.location.reload();
+      }
+    });
+  }
+</script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ブラウザ動画圧縮ツール</title>
   <style>
