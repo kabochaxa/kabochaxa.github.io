@@ -350,7 +350,13 @@
         const duration = await getVideoDuration(file);
 
         // --- ビットレートの計算 ---
-        const totalBitrateKbps = (targetMB * 8192) / duration;
+       // --- ビットレートの計算（安全マージンの導入） ---
+        // メタデータ（見えない管理データ）やビットレートのブレによる容量超過を防ぐため、
+        // 意図的に目標サイズの「90%」を基準に計算します（10%を安全マージンとして確保）
+        const safetyMargin = 0.90; 
+        const safeTargetMB = targetMB * safetyMargin;
+        
+        const totalBitrateKbps = (safeTargetMB * 8192) / duration;
         const isAudioRemoved = removeAudioCheckbox.checked;
         const audioBitrateKbps = 128;
         
@@ -379,12 +385,15 @@
         // --- コマンドの動的組み立て ---
         const ffmpegArgs = ['-i', 'input.mp4'];
 
-        // 映像ビットレート
+        // 映像ビットレート（厳格な上限設定を追加）
         ffmpegArgs.push('-b:v', `${videoBitrateKbps}k`);
+        // 【追加】maxrateとbufsizeを指定し、瞬間的にもビットレートが跳ね上がるのをブロックします
+        ffmpegArgs.push('-maxrate', `${videoBitrateKbps}k`);
+        ffmpegArgs.push('-bufsize', `${videoBitrateKbps * 2}k`);
 
         // 音声の設定（消去 or 保持）
         if (isAudioRemoved) {
-          ffmpegArgs.push('-an'); // Audio None (音声を完全に削除)
+          ffmpegArgs.push('-an'); 
         } else {
           ffmpegArgs.push('-b:a', `${audioBitrateKbps}k`);
         }
@@ -392,7 +401,6 @@
         // 解像度の設定（変更する場合のみ）
         const selectedRes = resolutionSelect.value;
         if (selectedRes !== 'original') {
-          // -2 を幅に指定することで、高さを基準に元の比率を維持したまま、MP4の仕様(2の倍数)に自動調整します
           ffmpegArgs.push('-vf', `scale=-2:${selectedRes}`);
         }
 
@@ -401,7 +409,7 @@
         ffmpegArgs.push('-threads', '4');
         ffmpegArgs.push('output.mp4');
 
-        // 組み立てたコマンドをスプレッド構文(...)で展開して実行
+        // 組み立てたコマンドを展開して実行
         await ffmpeg.run(...ffmpegArgs);
 
         statusText.innerText = '圧縮完了！ファイルを生成しています...';
