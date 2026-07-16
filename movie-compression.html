@@ -224,11 +224,17 @@
 
         // FFmpegコマンドの実行 (1パスエンコード)
         await ffmpeg.run(
-          '-i', 'input.mp4', 
-          '-b:v', `${videoBitrateKbps}k`, 
-          '-b:a', `${audioBitrateKbps}k`, 
-          'output.mp4'
-        );
+  '-i', 'input.mp4', 
+  '-b:v', `${videoBitrateKbps}k`, 
+  '-b:a', `${audioBitrateKbps}k`, 
+  '-preset', 'ultrafast',    // 最速のエンコードプリセットを指定
+  '-threads', '4',           // 4スレッドで処理させる（環境に合わせて2〜8で調整）
+  
+  // もし解像度も下げてさらに爆速にしたい場合は、以下の行の先頭の「//」を消してください
+  // '-vf', 'scale=-2:720',  // 高さを720pxに縮小（幅は自動計算）
+  
+  'output.mp4'
+);
 
         statusText.innerText = '圧縮完了！ファイルを生成しています...';
         
