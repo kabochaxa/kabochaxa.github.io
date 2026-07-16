@@ -48,14 +48,14 @@
       font-weight: bold;
       margin-bottom: 0.5rem;
     }
-    input[type="file"], input[type="number"] {
+    input[type="file"], input[type="number"], select {
       width: 100%;
       padding: 0.75rem;
       border: 1px solid var(--border-color);
       border-radius: 6px;
       box-sizing: border-box;
+      font-size: 1rem;
     }
-    /* スライダーと数値入力の横並び調整 */
     .size-input-container {
       display: flex;
       align-items: center;
@@ -70,7 +70,6 @@
       width: 100px;
       text-align: right;
     }
-    /* プリセットボタンのスタイル */
     .preset-container {
       display: flex;
       flex-wrap: wrap;
@@ -92,7 +91,6 @@
       color: white;
       border-color: var(--primary-color);
     }
-    /* ラジオボタン（圧縮モード）のスタイル */
     .mode-group {
       display: flex;
       gap: 1rem;
@@ -120,6 +118,19 @@
     .mode-option input:checked + .mode-label-text {
       background-color: var(--primary-color);
       color: white;
+    }
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .checkbox-group input {
+      width: 1.2rem;
+      height: 1.2rem;
+      cursor: pointer;
     }
     button.action-btn {
       width: 100%;
@@ -200,9 +211,25 @@
         <input type="range" id="size-slider" min="1" max="100" step="0.1" value="10">
         <input type="number" id="target-size" class="inline-size" value="10" min="1" step="0.1">
       </div>
-      
-      <div class="preset-container" id="preset-buttons">
-        </div>
+      <div class="preset-container" id="preset-buttons"></div>
+    </div>
+
+    <div class="form-group">
+      <label for="resolution-select">解像度 (アスペクト比維持)</label>
+      <select id="resolution-select">
+        <option value="original" selected>Original (変更しない)</option>
+        <option value="1080">1080p</option>
+        <option value="720">720p</option>
+        <option value="480">480p</option>
+        <option value="360">360p</option>
+        <option value="240">240p</option>
+        <option value="144">144p</option>
+      </select>
+
+      <label class="checkbox-group">
+        <input type="checkbox" id="remove-audio">
+        音声を消去する
+      </label>
     </div>
 
     <div class="form-group">
@@ -238,7 +265,6 @@
   </div>
 
   <script>
-    // --- プリセットの設定（ここを編集して簡単にボタンを追加できます） ---
     const presets = [
       { name: "Discord (10MB)", size: 10 },
       { name: "LINE (20MB)", size: 20 },
@@ -246,15 +272,15 @@
       { name: "Discord Nitro (50MB)", size: 50 }
     ];
 
-    // FFmpegの初期化
     const { createFFmpeg, fetchFile } = FFmpeg;
     const ffmpeg = createFFmpeg({ log: true });
 
-    // DOM要素の取得
     const uploadInput = document.getElementById('video-upload');
     const sizeSlider = document.getElementById('size-slider');
     const targetSizeInput = document.getElementById('target-size');
     const presetContainer = document.getElementById('preset-buttons');
+    const resolutionSelect = document.getElementById('resolution-select');
+    const removeAudioCheckbox = document.getElementById('remove-audio');
     const compressBtn = document.getElementById('compress-btn');
     const progressContainer = document.getElementById('progress-container');
     const progressBar = document.getElementById('progress-bar');
@@ -262,38 +288,28 @@
     const resultContainer = document.getElementById('result-container');
     const downloadLink = document.getElementById('download-link');
 
-    // --- プリセットボタンの動的生成 ---
     presets.forEach(preset => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'preset-btn';
       btn.textContent = preset.name;
-      btn.addEventListener('click', () => {
-        updateTargetSize(preset.size);
-      });
+      btn.addEventListener('click', () => updateTargetSize(preset.size));
       presetContainer.appendChild(btn);
     });
 
-    // --- スライダーと数値入力の連動処理 ---
     function updateTargetSize(val) {
       const roundedVal = Math.max(1, parseFloat(val)).toFixed(1);
       targetSizeInput.value = roundedVal;
       sizeSlider.value = roundedVal;
     }
 
-    sizeSlider.addEventListener('input', (e) => {
-      updateTargetSize(e.target.value);
-    });
-
+    sizeSlider.addEventListener('input', (e) => updateTargetSize(e.target.value));
     targetSizeInput.addEventListener('input', (e) => {
       let val = parseFloat(e.target.value);
-      if (isNaN(val) || val < 1) {
-        val = 1;
-      }
+      if (isNaN(val) || val < 1) val = 1;
       updateTargetSize(val);
     });
 
-    // 動画の長さを取得する補助関数
     const getVideoDuration = (file) => {
       return new Promise((resolve) => {
         const video = document.createElement('video');
@@ -306,7 +322,6 @@
       });
     };
 
-    // 圧縮処理メイン
     compressBtn.addEventListener('click', async () => {
       const file = uploadInput.files[0];
       if (!file) {
@@ -317,13 +332,11 @@
       const targetMB = parseFloat(targetSizeInput.value);
       const originalMB = file.size / (1024 * 1024);
 
-      // 元動画より大きいサイズを指定した場合のブロック
       if (targetMB >= originalMB) {
         alert(`元のファイルサイズ（約${originalMB.toFixed(1)}MB）が目標サイズより小さいため、圧縮する必要はありません。`);
         return;
       }
 
-      // UIの初期化
       compressBtn.disabled = true;
       progressContainer.style.display = 'block';
       resultContainer.style.display = 'none';
@@ -331,53 +344,65 @@
       statusText.innerText = 'FFmpegエンジンを起動中...';
 
       try {
-        if (!ffmpeg.isLoaded()) {
-          await ffmpeg.load();
-        }
+        if (!ffmpeg.isLoaded()) await ffmpeg.load();
 
         statusText.innerText = '動画の長さを解析中...';
         const duration = await getVideoDuration(file);
 
-        // ビットレートの計算
+        // --- ビットレートの計算 ---
         const totalBitrateKbps = (targetMB * 8192) / duration;
+        const isAudioRemoved = removeAudioCheckbox.checked;
         const audioBitrateKbps = 128;
-        let videoBitrateKbps = Math.floor(totalBitrateKbps - audioBitrateKbps);
-
-        if (videoBitrateKbps < 100) {
-          videoBitrateKbps = 100;
-        }
-
-        // --- 選択された圧縮モードに応じた設定の決定 ---
-        const selectedMode = document.querySelector('input[name="compress-mode"]:checked').value;
-        let presetParam = 'ultrafast'; // ハイスピード（デフォルト）
         
-        if (selectedMode === 'high') {
-          presetParam = 'slow'; // 高画質（時間をかけて圧縮率と画質を高める）
-        } else if (selectedMode === 'balance') {
-          presetParam = 'medium'; // バランス
-        }
+        // 音声を消去する場合は、その分のデータ容量を映像に全振りする
+        let videoBitrateKbps = isAudioRemoved 
+          ? Math.floor(totalBitrateKbps) 
+          : Math.floor(totalBitrateKbps - audioBitrateKbps);
 
-        statusText.innerText = `圧縮の準備中... [モード: ${selectedMode}] (映像: ${videoBitrateKbps}kbpsに設定)`;
+        if (videoBitrateKbps < 100) videoBitrateKbps = 100;
 
-        // ファイルを仮想システムに書き込み
+        const selectedMode = document.querySelector('input[name="compress-mode"]:checked').value;
+        let presetParam = 'ultrafast';
+        if (selectedMode === 'high') presetParam = 'slow';
+        else if (selectedMode === 'balance') presetParam = 'medium';
+
+        statusText.innerText = `圧縮の準備中... [映像: ${videoBitrateKbps}kbps]`;
+
         ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
 
-        // 進捗管理
         ffmpeg.setProgress(({ ratio }) => {
           const percent = Math.min(Math.round(ratio * 100), 100);
           progressBar.style.width = `${percent}%`;
           statusText.innerText = `圧縮中... ${percent}%`;
         });
 
-        // コマンドの組み立てと実行
-        await ffmpeg.run(
-          '-i', 'input.mp4', 
-          '-b:v', `${videoBitrateKbps}k`, 
-          '-b:a', `${audioBitrateKbps}k`, 
-          '-preset', presetParam,  // モードごとのプリセットを適用
-          '-threads', '4',         // マルチスレッド処理
-          'output.mp4'
-        );
+        // --- コマンドの動的組み立て ---
+        const ffmpegArgs = ['-i', 'input.mp4'];
+
+        // 映像ビットレート
+        ffmpegArgs.push('-b:v', `${videoBitrateKbps}k`);
+
+        // 音声の設定（消去 or 保持）
+        if (isAudioRemoved) {
+          ffmpegArgs.push('-an'); // Audio None (音声を完全に削除)
+        } else {
+          ffmpegArgs.push('-b:a', `${audioBitrateKbps}k`);
+        }
+
+        // 解像度の設定（変更する場合のみ）
+        const selectedRes = resolutionSelect.value;
+        if (selectedRes !== 'original') {
+          // -2 を幅に指定することで、高さを基準に元の比率を維持したまま、MP4の仕様(2の倍数)に自動調整します
+          ffmpegArgs.push('-vf', `scale=-2:${selectedRes}`);
+        }
+
+        // 共通設定
+        ffmpegArgs.push('-preset', presetParam);
+        ffmpegArgs.push('-threads', '4');
+        ffmpegArgs.push('output.mp4');
+
+        // 組み立てたコマンドをスプレッド構文(...)で展開して実行
+        await ffmpeg.run(...ffmpegArgs);
 
         statusText.innerText = '圧縮完了！ファイルを生成しています...';
         
