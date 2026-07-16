@@ -3,17 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <script>
-  // Service Workerを登録し、分離環境が構築されていなければリロードする
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').then(() => {
-      if (!window.crossOriginIsolated) {
-        window.location.reload();
-      }
-    });
-  }
-</script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').then(() => {
+        if (!window.crossOriginIsolated) {
+          window.location.reload();
+        }
+      });
+    }
+  </script>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ブラウザ動画圧縮ツール</title>
+  <title>ブラウザ動画圧縮ツール PRO</title>
   <style>
     :root {
       --primary-color: #007bff;
@@ -56,7 +55,73 @@
       border-radius: 6px;
       box-sizing: border-box;
     }
-    button {
+    /* スライダーと数値入力の横並び調整 */
+    .size-input-container {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    input[type="range"] {
+      flex: 1;
+      height: 8px;
+      cursor: pointer;
+    }
+    input[type="number"].inline-size {
+      width: 100px;
+      text-align: right;
+    }
+    /* プリセットボタンのスタイル */
+    .preset-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .preset-btn {
+      background-color: #f1f3f5;
+      color: #495057;
+      border: 1px solid var(--border-color);
+      padding: 0.4rem 0.8rem;
+      font-size: 0.85rem;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .preset-btn:hover {
+      background-color: var(--primary-color);
+      color: white;
+      border-color: var(--primary-color);
+    }
+    /* ラジオボタン（圧縮モード）のスタイル */
+    .mode-group {
+      display: flex;
+      gap: 1rem;
+      background: #f1f3f5;
+      padding: 0.5rem;
+      border-radius: 8px;
+    }
+    .mode-option {
+      flex: 1;
+      text-align: center;
+      cursor: pointer;
+    }
+    .mode-option input {
+      display: none;
+    }
+    .mode-label-text {
+      display: block;
+      padding: 0.5rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: bold;
+      color: #495057;
+      transition: background-color 0.2s, color 0.2s;
+    }
+    .mode-option input:checked + .mode-label-text {
+      background-color: var(--primary-color);
+      color: white;
+    }
+    button.action-btn {
       width: 100%;
       background-color: var(--primary-color);
       color: white;
@@ -67,11 +132,12 @@
       border-radius: 6px;
       cursor: pointer;
       transition: background-color 0.2s;
+      margin-top: 1rem;
     }
-    button:hover {
+    button.action-btn:hover {
       background-color: #0056b3;
     }
-    button:disabled {
+    button.action-btn:disabled {
       background-color: #6c757d;
       cursor: not-allowed;
     }
@@ -121,7 +187,7 @@
 <body>
 
   <div class="card">
-    <h2>動画圧縮ツール</h2>
+    <h2>動画圧縮ツール PRO</h2>
     
     <div class="form-group">
       <label for="video-upload">動画ファイルを選択</label>
@@ -129,11 +195,35 @@
     </div>
 
     <div class="form-group">
-      <label for="target-size">目標のファイルサイズ (MB)</label>
-      <input type="number" id="target-size" value="10" min="1" step="0.1">
+      <label>目標のファイルサイズ (MB)</label>
+      <div class="size-input-container">
+        <input type="range" id="size-slider" min="1" max="100" step="0.1" value="10">
+        <input type="number" id="target-size" class="inline-size" value="10" min="1" step="0.1">
+      </div>
+      
+      <div class="preset-container" id="preset-buttons">
+        </div>
     </div>
 
-    <button id="compress-btn">圧縮を開始する</button>
+    <div class="form-group">
+      <label>圧縮モード</label>
+      <div class="mode-group">
+        <label class="mode-option">
+          <input type="radio" name="compress-mode" value="high">
+          <span class="mode-label-text">高画質</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="compress-mode" value="balance">
+          <span class="mode-label-text">バランス</span>
+        </label>
+        <label class="mode-option">
+          <input type="radio" name="compress-mode" value="fast" checked>
+          <span class="mode-label-text">ハイスピード</span>
+        </label>
+      </div>
+    </div>
+
+    <button id="compress-btn" class="action-btn">圧縮を開始する</button>
 
     <div id="progress-container">
       <div class="progress-bar-bg">
@@ -148,13 +238,23 @@
   </div>
 
   <script>
+    // --- プリセットの設定（ここを編集して簡単にボタンを追加できます） ---
+    const presets = [
+      { name: "Discord (10MB)", size: 10 },
+      { name: "LINE (20MB)", size: 20 },
+      { name: "Gmail / メール添付 (25MB)", size: 25 },
+      { name: "Discord Nitro (50MB)", size: 50 }
+    ];
+
     // FFmpegの初期化
     const { createFFmpeg, fetchFile } = FFmpeg;
     const ffmpeg = createFFmpeg({ log: true });
 
     // DOM要素の取得
     const uploadInput = document.getElementById('video-upload');
+    const sizeSlider = document.getElementById('size-slider');
     const targetSizeInput = document.getElementById('target-size');
+    const presetContainer = document.getElementById('preset-buttons');
     const compressBtn = document.getElementById('compress-btn');
     const progressContainer = document.getElementById('progress-container');
     const progressBar = document.getElementById('progress-bar');
@@ -162,7 +262,38 @@
     const resultContainer = document.getElementById('result-container');
     const downloadLink = document.getElementById('download-link');
 
-    // 動画の長さ（秒）を取得する補助関数
+    // --- プリセットボタンの動的生成 ---
+    presets.forEach(preset => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'preset-btn';
+      btn.textContent = preset.name;
+      btn.addEventListener('click', () => {
+        updateTargetSize(preset.size);
+      });
+      presetContainer.appendChild(btn);
+    });
+
+    // --- スライダーと数値入力の連動処理 ---
+    function updateTargetSize(val) {
+      const roundedVal = Math.max(1, parseFloat(val)).toFixed(1);
+      targetSizeInput.value = roundedVal;
+      sizeSlider.value = roundedVal;
+    }
+
+    sizeSlider.addEventListener('input', (e) => {
+      updateTargetSize(e.target.value);
+    });
+
+    targetSizeInput.addEventListener('input', (e) => {
+      let val = parseFloat(e.target.value);
+      if (isNaN(val) || val < 1) {
+        val = 1;
+      }
+      updateTargetSize(val);
+    });
+
+    // 動画の長さを取得する補助関数
     const getVideoDuration = (file) => {
       return new Promise((resolve) => {
         const video = document.createElement('video');
@@ -175,6 +306,7 @@
       });
     };
 
+    // 圧縮処理メイン
     compressBtn.addEventListener('click', async () => {
       const file = uploadInput.files[0];
       if (!file) {
@@ -183,8 +315,11 @@
       }
 
       const targetMB = parseFloat(targetSizeInput.value);
-      if (isNaN(targetMB) || targetMB <= 0) {
-        alert('有効な目標サイズ(MB)を指定してください。');
+      const originalMB = file.size / (1024 * 1024);
+
+      // 元動画より大きいサイズを指定した場合のブロック
+      if (targetMB >= originalMB) {
+        alert(`元のファイルサイズ（約${originalMB.toFixed(1)}MB）が目標サイズより小さいため、圧縮する必要はありません。`);
         return;
       }
 
@@ -196,7 +331,6 @@
       statusText.innerText = 'FFmpegエンジンを起動中...';
 
       try {
-        // FFmpegがロードされていなければロード
         if (!ffmpeg.isLoaded()) {
           await ffmpeg.load();
         }
@@ -204,58 +338,54 @@
         statusText.innerText = '動画の長さを解析中...';
         const duration = await getVideoDuration(file);
 
-        // --- ビットレートの計算 ---
-        // 1MB = 8192 kilobits
-        // 必要な総ビットレート(kbps) = (目標MB * 8192) / 動画の長さ(秒)
+        // ビットレートの計算
         const totalBitrateKbps = (targetMB * 8192) / duration;
-        
-        // 音声ビットレートを128kbpsと仮定して差し引く
         const audioBitrateKbps = 128;
         let videoBitrateKbps = Math.floor(totalBitrateKbps - audioBitrateKbps);
 
-        // 極端に画質が破綻しないよう最低限のビットレートを確保（エラー回避）
         if (videoBitrateKbps < 100) {
           videoBitrateKbps = 100;
-          console.warn('指定されたサイズが小さすぎるため、最低限の画質でエンコードします。');
         }
 
-        statusText.innerText = `圧縮の準備中... (映像: ${videoBitrateKbps}kbpsに設定)`;
+        // --- 選択された圧縮モードに応じた設定の決定 ---
+        const selectedMode = document.querySelector('input[name="compress-mode"]:checked').value;
+        let presetParam = 'ultrafast'; // ハイスピード（デフォルト）
+        
+        if (selectedMode === 'high') {
+          presetParam = 'slow'; // 高画質（時間をかけて圧縮率と画質を高める）
+        } else if (selectedMode === 'balance') {
+          presetParam = 'medium'; // バランス
+        }
 
-        // ファイルを仮想ファイルシステムに書き込み
+        statusText.innerText = `圧縮の準備中... [モード: ${selectedMode}] (映像: ${videoBitrateKbps}kbpsに設定)`;
+
+        // ファイルを仮想システムに書き込み
         ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
 
-        // 進捗状況のモニタリング
+        // 進捗管理
         ffmpeg.setProgress(({ ratio }) => {
           const percent = Math.min(Math.round(ratio * 100), 100);
           progressBar.style.width = `${percent}%`;
           statusText.innerText = `圧縮中... ${percent}%`;
         });
 
-        // FFmpegコマンドの実行 (1パスエンコード)
+        // コマンドの組み立てと実行
         await ffmpeg.run(
-  '-i', 'input.mp4', 
-  '-b:v', `${videoBitrateKbps}k`, 
-  '-b:a', `${audioBitrateKbps}k`, 
-  '-preset', 'ultrafast',    // 最速のエンコードプリセットを指定
-  '-threads', '4',           // 4スレッドで処理させる（環境に合わせて2〜8で調整）
-  
-  // もし解像度も下げてさらに爆速にしたい場合は、以下の行の先頭の「//」を消してください
-  // '-vf', 'scale=-2:720',  // 高さを720pxに縮小（幅は自動計算）
-  
-  'output.mp4'
-);
+          '-i', 'input.mp4', 
+          '-b:v', `${videoBitrateKbps}k`, 
+          '-b:a', `${audioBitrateKbps}k`, 
+          '-preset', presetParam,  // モードごとのプリセットを適用
+          '-threads', '4',         // マルチスレッド処理
+          'output.mp4'
+        );
 
         statusText.innerText = '圧縮完了！ファイルを生成しています...';
         
-        // 結果ファイルの読み取り
         const data = ffmpeg.FS('readFile', 'output.mp4');
-
-        // Blobに変換してダウンロードリンクを生成
         const blob = new Blob([data.buffer], { type: 'video/mp4' });
         const url = URL.createObjectURL(blob);
 
         downloadLink.href = url;
-        // 元のファイル名を元に新しいファイル名を作成
         const originalName = file.name.split('.').slice(0, -1).join('.');
         downloadLink.download = `${originalName}_compressed.mp4`;
         
@@ -264,7 +394,7 @@
 
       } catch (error) {
         console.error('圧縮エラー:', error);
-        statusText.innerText = 'エラーが発生しました。ブラウザが対応していないか、メモリ不足の可能性があります。';
+        statusText.innerText = 'エラーが発生しました。ファイルサイズが大きすぎるか、メモリ不足の可能性があります。';
       } finally {
         compressBtn.disabled = false;
       }
