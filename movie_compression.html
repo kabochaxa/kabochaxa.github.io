@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ブラウザ動画圧縮ツール</title>
+  <style>
+    :root {
+      --primary-color: #007bff;
+      --bg-color: #f8f9fa;
+      --border-color: #dee2e6;
+    }
+    body {
+      font-family: 'Helvetica Neue', Arial, 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', Meiryo, sans-serif;
+      background-color: var(--bg-color);
+      color: #333;
+      max-width: 600px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      line-height: 1.6;
+    }
+    .card {
+      background: #fff;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+      border: 1px solid var(--border-color);
+    }
+    h2 {
+      margin-top: 0;
+      text-align: center;
+      color: #212529;
+    }
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+    label {
+      display: block;
+      font-weight: bold;
+      margin-bottom: 0.5rem;
+    }
+    input[type="file"], input[type="number"] {
+      width: 100%;
+      padding: 0.75rem;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      padding: 1rem;
+      font-size: 1rem;
+      font-weight: bold;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    button:disabled {
+      background-color: #6c757d;
+      cursor: not-allowed;
+    }
+    #progress-container {
+      display: none;
+      margin-top: 1.5rem;
+    }
+    .progress-bar-bg {
+      width: 100%;
+      height: 20px;
+      background-color: #e9ecef;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      width: 0%;
+      height: 100%;
+      background-color: #28a745;
+      transition: width 0.3s ease;
+    }
+    #status-text {
+      text-align: center;
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+      color: #6c757d;
+    }
+    #result-container {
+      display: none;
+      margin-top: 2rem;
+      text-align: center;
+    }
+    #download-link {
+      display: inline-block;
+      background-color: #28a745;
+      color: white;
+      text-decoration: none;
+      padding: 0.75rem 1.5rem;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+    #download-link:hover {
+      background-color: #218838;
+    }
+  </style>
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js"></script>
+</head>
+<body>
+
+  <div class="card">
+    <h2>動画圧縮ツール</h2>
+    
+    <div class="form-group">
+      <label for="video-upload">動画ファイルを選択</label>
+      <input type="file" id="video-upload" accept="video/*">
+    </div>
+
+    <div class="form-group">
+      <label for="target-size">目標のファイルサイズ (MB)</label>
+      <input type="number" id="target-size" value="10" min="1" step="0.1">
+    </div>
+
+    <button id="compress-btn">圧縮を開始する</button>
+
+    <div id="progress-container">
+      <div class="progress-bar-bg">
+        <div id="progress-bar"></div>
+      </div>
+      <p id="status-text">準備中...</p>
+    </div>
+
+    <div id="result-container">
+      <a id="download-link" href="#" download="compressed_video.mp4">圧縮された動画をダウンロード</a>
+    </div>
+  </div>
+
+  <script>
+    // FFmpegの初期化
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: true });
+
+    // DOM要素の取得
+    const uploadInput = document.getElementById('video-upload');
+    const targetSizeInput = document.getElementById('target-size');
+    const compressBtn = document.getElementById('compress-btn');
+    const progressContainer = document.getElementById('progress-container');
+    const progressBar = document.getElementById('progress-bar');
+    const statusText = document.getElementById('status-text');
+    const resultContainer = document.getElementById('result-container');
+    const downloadLink = document.getElementById('download-link');
+
+    // 動画の長さ（秒）を取得する補助関数
+    const getVideoDuration = (file) => {
+      return new Promise((resolve) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => {
+          URL.revokeObjectURL(video.src);
+          resolve(video.duration);
+        };
+        video.src = URL.createObjectURL(file);
+      });
+    };
+
+    compressBtn.addEventListener('click', async () => {
+      const file = uploadInput.files[0];
+      if (!file) {
+        alert('動画ファイルを選択してください。');
+        return;
+      }
+
+      const targetMB = parseFloat(targetSizeInput.value);
+      if (isNaN(targetMB) || targetMB <= 0) {
+        alert('有効な目標サイズ(MB)を指定してください。');
+        return;
+      }
+
+      // UIの初期化
+      compressBtn.disabled = true;
+      progressContainer.style.display = 'block';
+      resultContainer.style.display = 'none';
+      progressBar.style.width = '0%';
+      statusText.innerText = 'FFmpegエンジンを起動中...';
+
+      try {
+        // FFmpegがロードされていなければロード
+        if (!ffmpeg.isLoaded()) {
+          await ffmpeg.load();
+        }
+
+        statusText.innerText = '動画の長さを解析中...';
+        const duration = await getVideoDuration(file);
+
+        // --- ビットレートの計算 ---
+        // 1MB = 8192 kilobits
+        // 必要な総ビットレート(kbps) = (目標MB * 8192) / 動画の長さ(秒)
+        const totalBitrateKbps = (targetMB * 8192) / duration;
+        
+        // 音声ビットレートを128kbpsと仮定して差し引く
+        const audioBitrateKbps = 128;
+        let videoBitrateKbps = Math.floor(totalBitrateKbps - audioBitrateKbps);
+
+        // 極端に画質が破綻しないよう最低限のビットレートを確保（エラー回避）
+        if (videoBitrateKbps < 100) {
+          videoBitrateKbps = 100;
+          console.warn('指定されたサイズが小さすぎるため、最低限の画質でエンコードします。');
+        }
+
+        statusText.innerText = `圧縮の準備中... (映像: ${videoBitrateKbps}kbpsに設定)`;
+
+        // ファイルを仮想ファイルシステムに書き込み
+        ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
+
+        // 進捗状況のモニタリング
+        ffmpeg.setProgress(({ ratio }) => {
+          const percent = Math.min(Math.round(ratio * 100), 100);
+          progressBar.style.width = `${percent}%`;
+          statusText.innerText = `圧縮中... ${percent}%`;
+        });
+
+        // FFmpegコマンドの実行 (1パスエンコード)
+        await ffmpeg.run(
+          '-i', 'input.mp4', 
+          '-b:v', `${videoBitrateKbps}k`, 
+          '-b:a', `${audioBitrateKbps}k`, 
+          'output.mp4'
+        );
+
+        statusText.innerText = '圧縮完了！ファイルを生成しています...';
+        
+        // 結果ファイルの読み取り
+        const data = ffmpeg.FS('readFile', 'output.mp4');
+
+        // Blobに変換してダウンロードリンクを生成
+        const blob = new Blob([data.buffer], { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+
+        downloadLink.href = url;
+        // 元のファイル名を元に新しいファイル名を作成
+        const originalName = file.name.split('.').slice(0, -1).join('.');
+        downloadLink.download = `${originalName}_compressed.mp4`;
+        
+        resultContainer.style.display = 'block';
+        statusText.innerText = '完了しました。下のボタンからダウンロードしてください。';
+
+      } catch (error) {
+        console.error('圧縮エラー:', error);
+        statusText.innerText = 'エラーが発生しました。ブラウザが対応していないか、メモリ不足の可能性があります。';
+      } finally {
+        compressBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
