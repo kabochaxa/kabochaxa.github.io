@@ -366,7 +366,7 @@
 
         // チェック状態によって安全マージンを切り替える
         // 2パス（ギリギリ攻める）なら3%余裕、1パス（通常）なら10%余裕
-        const safetyMargin = isTwoPass ? 0.97 : 0.90; 
+        const safetyMargin = isTwoPass ? 0.95 : 0.90; 
         const safeTargetMB = targetMB * safetyMargin;
         
         const totalBitrateKbps = (safeTargetMB * 8192) / duration;
