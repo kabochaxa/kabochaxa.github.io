@@ -126,6 +126,10 @@
       margin-top: 0.5rem;
       font-weight: bold;
       cursor: pointer;
+      padding: 0.5rem;
+      border-radius: 6px;
+      background-color: #f8f9fa;
+      border: 1px solid #e9ecef;
     }
     .checkbox-group input {
       width: 1.2rem;
@@ -225,10 +229,17 @@
         <option value="240">240p</option>
         <option value="144">144p</option>
       </select>
+    </div>
 
+    <div class="form-group">
+      <label>オプション</label>
       <label class="checkbox-group">
         <input type="checkbox" id="remove-audio">
         音声を消去する
+      </label>
+      <label class="checkbox-group">
+        <input type="checkbox" id="two-pass-mode">
+        ギリギリを攻める (所要時間2倍 / 2パスエンコード)
       </label>
     </div>
 
@@ -268,7 +279,7 @@
     const presets = [
       { name: "Discord (10MB)", size: 10 },
       { name: "LINE (20MB)", size: 20 },
-      { name: "Gmail / メール添付 (25MB)", size: 25 },
+      { name: "Gmail (25MB)", size: 25 },
       { name: "Discord Nitro (50MB)", size: 50 }
     ];
 
@@ -281,6 +292,7 @@
     const presetContainer = document.getElementById('preset-buttons');
     const resolutionSelect = document.getElementById('resolution-select');
     const removeAudioCheckbox = document.getElementById('remove-audio');
+    const twoPassCheckbox = document.getElementById('two-pass-mode');
     const compressBtn = document.getElementById('compress-btn');
     const progressContainer = document.getElementById('progress-container');
     const progressBar = document.getElementById('progress-bar');
@@ -349,18 +361,17 @@
         statusText.innerText = '動画の長さを解析中...';
         const duration = await getVideoDuration(file);
 
-        // --- ビットレートの計算 ---
-       // --- ビットレートの計算（安全マージンの導入） ---
-        // メタデータ（見えない管理データ）やビットレートのブレによる容量超過を防ぐため、
-        // 意図的に目標サイズの「90%」を基準に計算します（10%を安全マージンとして確保）
-        const safetyMargin = 0.90; 
+        const isTwoPass = twoPassCheckbox.checked;
+        const isAudioRemoved = removeAudioCheckbox.checked;
+
+        // チェック状態によって安全マージンを切り替える
+        // 2パス（ギリギリ攻める）なら3%余裕、1パス（通常）なら10%余裕
+        const safetyMargin = isTwoPass ? 0.97 : 0.90; 
         const safeTargetMB = targetMB * safetyMargin;
         
         const totalBitrateKbps = (safeTargetMB * 8192) / duration;
-        const isAudioRemoved = removeAudioCheckbox.checked;
         const audioBitrateKbps = 128;
         
-        // 音声を消去する場合は、その分のデータ容量を映像に全振りする
         let videoBitrateKbps = isAudioRemoved 
           ? Math.floor(totalBitrateKbps) 
           : Math.floor(totalBitrateKbps - audioBitrateKbps);
@@ -372,45 +383,77 @@
         if (selectedMode === 'high') presetParam = 'slow';
         else if (selectedMode === 'balance') presetParam = 'medium';
 
-        statusText.innerText = `圧縮の準備中... [映像: ${videoBitrateKbps}kbps]`;
-
         ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(file));
 
-        ffmpeg.setProgress(({ ratio }) => {
-          const percent = Math.min(Math.round(ratio * 100), 100);
-          progressBar.style.width = `${percent}%`;
-          statusText.innerText = `圧縮中... ${percent}%`;
-        });
-
-        // --- コマンドの動的組み立て ---
-        const ffmpegArgs = ['-i', 'input.mp4'];
-
-        // 映像ビットレート（厳格な上限設定を追加）
-        ffmpegArgs.push('-b:v', `${videoBitrateKbps}k`);
-        // 【追加】maxrateとbufsizeを指定し、瞬間的にもビットレートが跳ね上がるのをブロックします
-        ffmpegArgs.push('-maxrate', `${videoBitrateKbps}k`);
-        ffmpegArgs.push('-bufsize', `${videoBitrateKbps * 2}k`);
-
-        // 音声の設定（消去 or 保持）
-        if (isAudioRemoved) {
-          ffmpegArgs.push('-an'); 
-        } else {
-          ffmpegArgs.push('-b:a', `${audioBitrateKbps}k`);
-        }
-
-        // 解像度の設定（変更する場合のみ）
         const selectedRes = resolutionSelect.value;
-        if (selectedRes !== 'original') {
-          ffmpegArgs.push('-vf', `scale=-2:${selectedRes}`);
+        const vfArg = selectedRes !== 'original' ? ['-vf', `scale=-2:${selectedRes}`] : [];
+
+        if (isTwoPass) {
+          // ==========================================
+          // ギリギリを攻める（2パスエンコード）
+          // ==========================================
+          statusText.innerText = `解析中 (1/2パス)...`;
+          ffmpeg.setProgress(({ ratio }) => {
+            const percent = Math.min(Math.round(ratio * 100), 100);
+            progressBar.style.width = `${percent / 2}%`; 
+            statusText.innerText = `解析中 (1/2パス)... ${percent}%`;
+          });
+
+          await ffmpeg.run(
+            '-i', 'input.mp4',
+            '-b:v', `${videoBitrateKbps}k`,
+            '-pass', '1',
+            '-an',
+            ...vfArg,
+            '-preset', presetParam,
+            '-threads', '4',
+            '-f', 'mp4',
+            'pass1.mp4'
+          );
+
+          statusText.innerText = `本番圧縮中 (2/2パス)...`;
+          ffmpeg.setProgress(({ ratio }) => {
+            const percent = Math.min(Math.round(ratio * 100), 100);
+            progressBar.style.width = `${50 + (percent / 2)}%`; 
+            statusText.innerText = `本番圧縮中 (2/2パス)... ${percent}%`;
+          });
+
+          const pass2Args = [
+            '-i', 'input.mp4',
+            '-b:v', `${videoBitrateKbps}k`,
+            '-pass', '2'
+          ];
+          if (isAudioRemoved) pass2Args.push('-an'); 
+          else pass2Args.push('-b:a', `${audioBitrateKbps}k`);
+          if (vfArg.length > 0) pass2Args.push(...vfArg);
+          pass2Args.push('-preset', presetParam, '-threads', '4', 'output.mp4');
+
+          await ffmpeg.run(...pass2Args);
+
+        } else {
+          // ==========================================
+          // 通常の圧縮（1パスエンコード + maxrate制限）
+          // ==========================================
+          ffmpeg.setProgress(({ ratio }) => {
+            const percent = Math.min(Math.round(ratio * 100), 100);
+            progressBar.style.width = `${percent}%`;
+            statusText.innerText = `圧縮中... ${percent}%`;
+          });
+
+          const ffmpegArgs = ['-i', 'input.mp4'];
+          ffmpegArgs.push('-b:v', `${videoBitrateKbps}k`);
+          // 1パスの場合は容量オーバーを防ぐために上限を厳格に指定
+          ffmpegArgs.push('-maxrate', `${videoBitrateKbps}k`);
+          ffmpegArgs.push('-bufsize', `${videoBitrateKbps * 2}k`);
+
+          if (isAudioRemoved) ffmpegArgs.push('-an'); 
+          else ffmpegArgs.push('-b:a', `${audioBitrateKbps}k`);
+          if (vfArg.length > 0) ffmpegArgs.push(...vfArg);
+          
+          ffmpegArgs.push('-preset', presetParam, '-threads', '4', 'output.mp4');
+
+          await ffmpeg.run(...ffmpegArgs);
         }
-
-        // 共通設定
-        ffmpegArgs.push('-preset', presetParam);
-        ffmpegArgs.push('-threads', '4');
-        ffmpegArgs.push('output.mp4');
-
-        // 組み立てたコマンドを展開して実行
-        await ffmpeg.run(...ffmpegArgs);
 
         statusText.innerText = '圧縮完了！ファイルを生成しています...';
         
