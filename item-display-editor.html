@@ -54,6 +54,12 @@ canvas{display:block;touch-action:none}
   background:rgba(13,16,19,.85);border:1px solid var(--line);border-radius:2px;
   padding:6px 10px;pointer-events:none;opacity:0;transition:opacity .12s}
 #readout.on{opacity:1}
+.compass{
+  position:absolute;left:0;top:0;pointer-events:none;transform:translate(-50%,-50%);
+  color:var(--dim);opacity:.4;font-size:12px;font-weight:700;letter-spacing:.12em;
+  text-align:center;line-height:1.15;
+}
+.compass em{display:block;font-style:normal;font-weight:400;font-size:8px;letter-spacing:.22em;opacity:.75}
 
 /* ---------- panel ---------- */
 #panel{flex:0 0 330px;background:var(--panel);border-left:1px solid var(--line);
@@ -131,6 +137,10 @@ input:focus,select:focus{border-color:var(--xp)}
 <div id="main">
   <div id="stage">
     <div id="canvasWrap"></div>
+    <div class="compass" id="cN">N<em>north</em></div>
+    <div class="compass" id="cS">S<em>south</em></div>
+    <div class="compass" id="cE">E<em>east</em></div>
+    <div class="compass" id="cW">W<em>west</em></div>
     <div id="readout"></div>
     <div id="legend">
       <i class="lx">X</i> 東 &nbsp; <i class="ly">Y</i> 上 &nbsp; <i class="lz">Z</i> 南<br>
@@ -407,10 +417,34 @@ var moveG = new THREE.Group(); gizmo.add(moveG);
   register(v, pg, ax, "move", moveG);
 });
 
-/* -- rotate: rings -- */
+/* -- rotate: rings (カメラに近い半分だけ描画) -- */
+var ringMats = [];
+function halfMat(c){
+  var m = new THREE.ShaderMaterial({
+    uniforms:{
+      uColor:{value:new THREE.Color(c)},
+      uCam:{value:new THREE.Vector3()},
+      uCenter:{value:new THREE.Vector3()}
+    },
+    vertexShader:
+      "varying vec3 vW;" +
+      "void main(){ vec4 w = modelMatrix * vec4(position,1.0); vW = w.xyz;" +
+      "gl_Position = projectionMatrix * viewMatrix * w; }",
+    fragmentShader:
+      "uniform vec3 uColor; uniform vec3 uCam; uniform vec3 uCenter; varying vec3 vW;" +
+      "void main(){" +
+      "  vec3 toCam = normalize(uCam - uCenter);" +
+      "  if(dot(normalize(vW - uCenter), toCam) < -0.015) discard;" +
+      "  gl_FragColor = vec4(uColor, 0.95);" +
+      "}",
+    transparent:true, depthTest:false, side:THREE.DoubleSide
+  });
+  ringMats.push(m);
+  return m;
+}
 var rotG = new THREE.Group(); gizmo.add(rotG);
 ["x","y","z"].forEach(function(ax){
-  var v = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.011, 8, 72), solidMat(COL[ax]));
+  var v = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.011, 8, 72), halfMat(COL[ax]));
   var p = new THREE.Mesh(new THREE.TorusGeometry(0.85, 0.07, 6, 40), pickMat());
   var vg = new THREE.Group(), pg = new THREE.Group();
   vg.add(v); pg.add(p);
@@ -418,6 +452,19 @@ var rotG = new THREE.Group(); gizmo.add(rotG);
   if(ax === "y"){ vg.rotation.x = Math.PI/2; pg.rotation.x = Math.PI/2; }
   register(vg, pg, ax, "rotate", rotG);
 });
+/* 球の外周（カメラ正対、操作対象ではない） */
+var outline = (function(){
+  var pts = [];
+  for(var i=0;i<=96;i++){
+    var a = i/96*Math.PI*2;
+    pts.push(new THREE.Vector3(Math.cos(a)*0.85, Math.sin(a)*0.85, 0));
+  }
+  var l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({color:0x46525a, transparent:true, opacity:0.9, depthTest:false}));
+  l.renderOrder = 899;
+  scene.add(l);
+  return l;
+})();
 
 /* -- scale: boxes -- */
 var scaleG = new THREE.Group(); gizmo.add(scaleG);
@@ -439,7 +486,11 @@ var scaleG = new THREE.Group(); gizmo.add(scaleG);
 })();
 
 function setHandleColor(h, c){
-  h.visual.traverse(function(o){ if(o.material) o.material.color.setHex(c); });
+  h.visual.traverse(function(o){
+    if(!o.material) return;
+    if(o.material.uniforms && o.material.uniforms.uColor) o.material.uniforms.uColor.value.setHex(c);
+    else if(o.material.color) o.material.color.setHex(c);
+  });
 }
 function refreshGizmo(){
   moveG.visible  = tool === "move";
@@ -487,10 +538,19 @@ function setNDC(e){
 function pick(){
   var targets = handles.filter(function(h){ return h.kind === tool; }).map(function(h){ return h.pick; });
   var hits = ray.intersectObjects(targets, true);
-  if(!hits.length) return null;
-  var o = hits[0].object;
-  while(o && !o.userData.handle) o = o.parent;
-  return o ? o.userData.handle : null;
+  var center = gizmoOrigin();
+  var toCam = camera.position.clone().sub(center).normalize();
+  for(var i=0;i<hits.length;i++){
+    var o = hits[i].object;
+    while(o && !o.userData.handle) o = o.parent;
+    if(!o) continue;
+    var h = o.userData.handle;
+    /* 見えていない奥側の半円は掴めない */
+    if(h.kind === "rotate" &&
+       hits[i].point.clone().sub(center).normalize().dot(toCam) < -0.015) continue;
+    return h;
+  }
+  return null;
 }
 function worldAxis(ax){
   var q = new THREE.Quaternion();
@@ -661,6 +721,30 @@ addEventListener("keydown", function(e){
   }
 });
 
+/* ---------- compass ---------- */
+var COMPASS = [
+  {el:document.getElementById("cN"), v:new THREE.Vector3(0,0,-1)},
+  {el:document.getElementById("cS"), v:new THREE.Vector3(0,0, 1)},
+  {el:document.getElementById("cE"), v:new THREE.Vector3( 1,0,0)},
+  {el:document.getElementById("cW"), v:new THREE.Vector3(-1,0,0)}
+];
+var _cp = new THREE.Vector3();
+function updateCompass(){
+  var w = wrap.clientWidth, h = wrap.clientHeight, m = 24;
+  for(var i=0;i<COMPASS.length;i++){
+    var c = COMPASS[i];
+    _cp.copy(c.v).multiplyScalar(6).add(target).project(camera);
+    var x = _cp.x, y = _cp.y;
+    if(_cp.z > 1){ x = -x; y = -y; }          /* カメラ背後なら反転して端に回す */
+    var mx = Math.max(Math.abs(x), Math.abs(y));
+    var k = mx > 1e-4 ? 0.95/mx : 0;           /* 常に画面の縁へ寄せる */
+    var sx = ( x*k*0.5 + 0.5)*w;
+    var sy = (-y*k*0.5 + 0.5)*h;
+    c.el.style.left = Math.min(w-m, Math.max(m, sx)) + "px";
+    c.el.style.top  = Math.min(h-m, Math.max(m, sy)) + "px";
+  }
+}
+
 /* ---------- output ---------- */
 function r5(v){ var n = Math.round(v*1e5)/1e5; return Object.is(n,-0) ? 0 : n; }
 function qArr(q){ return "[" + [q.x,q.y,q.z,q.w].map(function(v){ return r5(v)+"f"; }).join(",") + "]"; }
@@ -738,7 +822,22 @@ setTool("rotate");
 applyEntityRotation(); placeCamera(); resize(); syncAll(); update();
 (function loop(){
   requestAnimationFrame(loop);
-  gizmo.scale.setScalar(Math.max(0.35, radius*0.3));
+  var s = Math.max(0.21, radius*0.18);
+  gizmo.scale.setScalar(s);
+  entity.updateMatrixWorld(true);
+
+  var center = new THREE.Vector3();
+  gizmo.getWorldPosition(center);
+  for(var i=0;i<ringMats.length;i++){
+    ringMats[i].uniforms.uCam.value.copy(camera.position);
+    ringMats[i].uniforms.uCenter.value.copy(center);
+  }
+  outline.visible = rotG.visible;
+  outline.position.copy(center);
+  outline.quaternion.copy(camera.quaternion);
+  outline.scale.setScalar(s);
+
+  updateCompass();
   renderer.render(scene, camera);
 })();
 })();
