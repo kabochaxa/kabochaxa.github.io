@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BALLISTIC-1 ／ 手続き型 銃声ジェネレーター</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+JP:wght@400;500;600&family=Saira+Condensed:wght@600;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#16232b;
+  --ink-2:#33454f;
+  --paper:#c7cfd1;
+  --paper-hi:#dbe0e0;
+  --recess:#9ba7ab;
+  --pen:#be1039;
+  --amber:#e0a02a;
+  --steel:#6e7e85;
+  --screen:#0d1a1f;
+  --screen-line:#20444d;
+  --fd:'Saira Condensed','IBM Plex Sans JP',sans-serif;
+  --fj:'IBM Plex Sans JP',system-ui,sans-serif;
+  --fm:'IBM Plex Mono',ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(120% 80% at 50% -10%, #d5dbdc 0%, #b8c2c5 60%, #9fabaf 100%) fixed;
+  color:var(--ink);
+  font-family:var(--fj);
+  font-size:14px;
+  line-height:1.5;
+  padding:22px 16px 60px;
+  -webkit-font-smoothing:antialiased;
+}
+.rig{max-width:1120px;margin:0 auto}
+
+/* ---------- 見出しプレート ---------- */
+.plate{
+  display:flex;align-items:flex-end;justify-content:space-between;gap:18px;flex-wrap:wrap;
+  border-bottom:2px solid var(--ink);
+  padding-bottom:10px;margin-bottom:18px;
+}
+.plate h1{
+  font-family:var(--fd);font-weight:800;letter-spacing:.06em;
+  font-size:clamp(30px,6vw,52px);line-height:.9;margin:0;
+  text-shadow:0 1px 0 rgba(255,255,255,.55);
+}
+.plate h1 em{font-style:normal;color:var(--pen)}
+.plate .sub{
+  font-family:var(--fm);font-size:11px;letter-spacing:.14em;color:var(--ink-2);
+  text-transform:uppercase;margin-top:6px;
+}
+.plate .jp{font-size:12px;color:var(--ink-2);max-width:34ch;text-align:right}
+
+/* ---------- レイアウト ---------- */
+.deck{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;align-items:start}
+@media(max-width:900px){.deck{grid-template-columns:1fr}}
+
+/* ---------- スクリーン ---------- */
+.scope{
+  background:var(--screen);
+  border-radius:3px;
+  padding:12px 12px 10px;
+  box-shadow:inset 0 3px 12px rgba(0,0,0,.75), 0 1px 0 rgba(255,255,255,.5);
+  position:relative;
+}
+.scope-head{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-family:var(--fm);font-size:10px;letter-spacing:.12em;color:#5d8a93;text-transform:uppercase;
+  margin-bottom:6px;
+}
+.canvas-wrap{position:relative;height:230px}
+@media(max-width:900px){.canvas-wrap{height:170px}}
+canvas{display:block;width:100%;height:100%}
+#playhead{
+  position:absolute;top:0;bottom:0;width:1px;background:var(--amber);
+  box-shadow:0 0 8px var(--amber);opacity:0;left:0;pointer-events:none;
+}
+.readout{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:10px;
+  background:#1d363d;border-radius:2px;overflow:hidden;
+}
+.readout div{background:#122228;padding:7px 9px}
+.readout dt{font-family:var(--fm);font-size:9px;letter-spacing:.12em;color:#5d8a93;text-transform:uppercase;margin:0}
+.readout dd{margin:2px 0 0;font-family:var(--fm);font-size:15px;color:#a9dbe2}
+.readout dd.warn{color:var(--pen)}
+
+/* ---------- 射撃コントロール ---------- */
+.trigger-bay{
+  margin-top:14px;background:var(--paper-hi);border:1px solid var(--recess);
+  border-radius:3px;padding:12px;display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center;
+}
+@media(max-width:520px){.trigger-bay{grid-template-columns:1fr}}
+#fire{
+  font-family:var(--fd);font-weight:800;font-size:26px;letter-spacing:.08em;
+  background:var(--pen);color:#fff;border:none;border-bottom:4px solid #7a0725;
+  border-radius:3px;padding:16px 30px;cursor:pointer;
+  text-shadow:0 1px 2px rgba(0,0,0,.35);
+  transition:transform .04s linear, filter .12s;
+}
+#fire:hover{filter:brightness(1.08)}
+#fire:active{transform:translateY(3px);border-bottom-width:1px}
+#fire:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+.modes{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.modes button{
+  font-family:var(--fj);font-size:12px;padding:6px 12px;cursor:pointer;
+  background:var(--paper);color:var(--ink-2);border:1px solid var(--recess);border-radius:2px;
+}
+.modes button[aria-pressed="true"]{background:var(--ink);color:var(--paper-hi);border-color:var(--ink)}
+.modes button:focus-visible{outline:2px solid var(--pen);outline-offset:2px}
+.hint{font-family:var(--fm);font-size:10.5px;color:var(--steel);letter-spacing:.04em}
+
+/* ---------- プリセット ---------- */
+.presets{margin-bottom:16px}
+.presets .cap,.rack .cap{
+  font-family:var(--fm);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--steel);margin-bottom:7px;
+}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips button{
+  font-family:var(--fj);font-size:12.5px;padding:7px 13px;cursor:pointer;
+  background:linear-gradient(#dfe4e4,#c3cccf);color:var(--ink);
+  border:1px solid var(--recess);border-radius:2px;
+  box-shadow:0 1px 0 rgba(255,255,255,.6) inset;
+}
+.chips button:hover{background:linear-gradient(#e9eded,#ccd4d6)}
+.chips button[aria-pressed="true"]{
+  background:var(--ink);color:var(--paper-hi);border-color:var(--ink);box-shadow:none;
+}
+.chips button:focus-visible{outline:2px solid var(--pen);outline-offset:2px}
+
+/* ---------- モジュール ---------- */
+.racks{display:grid;gap:12px}
+.mod{
+  background:linear-gradient(180deg,#ced5d7,#bcc5c8);
+  border:1px solid var(--recess);border-radius:3px;
+  box-shadow:0 1px 0 rgba(255,255,255,.55) inset, 0 1px 2px rgba(0,0,0,.12);
+  padding:11px 13px 14px;
+}
+.mod-head{display:flex;align-items:baseline;gap:9px;border-bottom:1px solid rgba(22,35,43,.22);padding-bottom:6px;margin-bottom:10px}
+.mod-head h2{
+  font-family:var(--fd);font-weight:800;font-size:19px;letter-spacing:.09em;margin:0;
+  text-shadow:0 1px 0 rgba(255,255,255,.5);
+}
+.mod-head span{font-size:11px;color:var(--ink-2)}
+.param{display:grid;grid-template-columns:8.5em 1fr 5.2em;align-items:center;gap:9px;padding:3px 0}
+.param .name{font-size:12px;color:var(--ink-2)}
+.param .val{font-family:var(--fm);font-size:12px;text-align:right;color:var(--ink)}
+
+input[type=range]{
+  -webkit-appearance:none;appearance:none;background:transparent;width:100%;height:20px;margin:0;cursor:pointer;
+}
+input[type=range]::-webkit-slider-runnable-track{
+  height:8px;border-radius:1px;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.45) 0 1px, transparent 1px 10%),
+    linear-gradient(#8e9a9e,#aab4b7);
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.45);
+}
+input[type=range]::-moz-range-track{
+  height:8px;border-radius:1px;background:linear-gradient(#8e9a9e,#aab4b7);
+  box-shadow:inset 0 1px 3px rgba(0,0,0,.45);
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:15px;height:22px;margin-top:-7px;border-radius:2px;
+  background:linear-gradient(180deg,#f0f3f3 0%,#c3cbcd 48%,#98a3a7 52%,#dfe4e4 100%);
+  border:1px solid #6d797d;box-shadow:0 1px 2px rgba(0,0,0,.4);
+  position:relative;
+}
+input[type=range]::-moz-range-thumb{
+  width:14px;height:21px;border-radius:2px;border:1px solid #6d797d;
+  background:linear-gradient(180deg,#f0f3f3 0%,#c3cbcd 48%,#98a3a7 52%,#dfe4e4 100%);
+}
+input[type=range]:focus-visible::-webkit-slider-thumb{border-color:var(--pen);box-shadow:0 0 0 2px rgba(190,16,57,.5)}
+
+/* ---------- フッター ---------- */
+.bench{
+  margin-top:20px;padding-top:14px;border-top:2px solid var(--ink);
+  display:flex;gap:10px;flex-wrap:wrap;align-items:center;
+}
+.bench button{
+  font-family:var(--fj);font-size:13px;padding:9px 16px;cursor:pointer;
+  background:var(--ink);color:var(--paper-hi);border:none;border-radius:2px;
+}
+.bench button.ghost{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+.bench button:focus-visible{outline:2px solid var(--pen);outline-offset:2px}
+.bench p{margin:0;font-size:11.5px;color:var(--ink-2);flex:1;min-width:220px}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="rig">
+
+  <div class="plate">
+    <div>
+      <h1>BALLISTIC<em>–1</em></h1>
+      <div class="sub">procedural gunshot synthesizer / web audio</div>
+    </div>
+    <p class="jp">サンプルを一切使わず、ノイズと発振器だけで銃声を組み立てます。パラメーターを動かすと波形と音が即座に更新されます。</p>
+  </div>
+
+  <div class="presets">
+    <div class="cap">プリセット</div>
+    <div class="chips" id="presets"></div>
+  </div>
+
+  <div class="deck">
+    <div>
+      <div class="scope">
+        <div class="scope-head"><span>波形モニター</span><span id="scopeScale">—</span></div>
+        <div class="canvas-wrap">
+          <canvas id="scope"></canvas>
+          <div id="playhead"></div>
+        </div>
+        <dl class="readout">
+          <div><dt>長さ</dt><dd id="rDur">—</dd></div>
+          <div><dt>ピーク</dt><dd id="rPeak">—</dd></div>
+          <div><dt>実効値</dt><dd id="rRms">—</dd></div>
+          <div><dt>状態</dt><dd id="rState">待機</dd></div>
+        </dl>
+      </div>
+
+      <div class="trigger-bay">
+        <button id="fire">FIRE</button>
+        <div>
+          <div class="modes" id="modes">
+            <button data-mode="single" aria-pressed="true">単発</button>
+            <button data-mode="burst" aria-pressed="false">3点バースト</button>
+            <button data-mode="auto" aria-pressed="false">フルオート</button>
+          </div>
+          <div class="hint">スペースキーでも発射。フルオートはボタンを押している間だけ連射します。</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="racks" id="racks"></div>
+  </div>
+
+  <div class="bench">
+    <button id="export">WAVを書き出す</button>
+    <button id="reset" class="ghost">初期値に戻す</button>
+    <p>書き出しは現在のパラメーターで再レンダリングした 44.1kHz / 16bit ステレオです。</p>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ============ パラメーター定義 ============ */
+const MODULES = [
+  {id:'crack', name:'CRACK', jp:'発射の立ち上がり', params:[
+    {k:'crackLevel', label:'レベル',   min:0, max:1,     step:.01, fmt:v=>v.toFixed(2)},
+    {k:'crackDecay', label:'減衰',     min:.002, max:.06, step:.001, fmt:v=>(v*1000).toFixed(0)+' ms'},
+    {k:'crackTone',  label:'高域中心',  min:800, max:9000, step:50,  fmt:v=>hz(v)}
+  ]},
+  {id:'blast', name:'BLAST', jp:'爆風ノイズ', params:[
+    {k:'blastLevel', label:'レベル',   min:0, max:1.4,  step:.01, fmt:v=>v.toFixed(2)},
+    {k:'blastDecay', label:'減衰',     min:.01, max:.5,  step:.005, fmt:v=>(v*1000).toFixed(0)+' ms'},
+    {k:'blastCut',   label:'カットオフ',min:200, max:12000, step:50, fmt:v=>hz(v)},
+    {k:'blastSweep', label:'掃引量',   min:0, max:1,     step:.01, fmt:v=>v.toFixed(2)},
+    {k:'blastDrive', label:'歪み',     min:0, max:1,     step:.01, fmt:v=>v.toFixed(2)}
+  ]},
+  {id:'body', name:'BODY', jp:'低域の圧', params:[
+    {k:'bodyLevel', label:'レベル',    min:0, max:1.4,  step:.01, fmt:v=>v.toFixed(2)},
+    {k:'bodyFreq',  label:'基音',      min:35, max:260,  step:1,   fmt:v=>hz(v)},
+    {k:'bodyDecay', label:'減衰',      min:.02, max:.6,  step:.005, fmt:v=>(v*1000).toFixed(0)+' ms'},
+    {k:'bodyDrop',  label:'ピッチ落ち', min:0, max:.9,   step:.01, fmt:v=>v.toFixed(2)}
+  ]},
+  {id:'mech', name:'MECH', jp:'機関部の作動音', params:[
+    {k:'mechLevel', label:'レベル',    min:0, max:1,    step:.01, fmt:v=>v.toFixed(2)},
+    {k:'mechDelay', label:'遅れ',      min:.01, max:.2, step:.005, fmt:v=>(v*1000).toFixed(0)+' ms'},
+    {k:'mechTone',  label:'金属感',    min:600, max:6000, step:50, fmt:v=>hz(v)}
+  ]},
+  {id:'room', name:'ROOM', jp:'反響と距離', params:[
+    {k:'roomMix',  label:'残響量',     min:0, max:1,    step:.01, fmt:v=>v.toFixed(2)},
+    {k:'roomSize', label:'残響長',     min:.05, max:3.5, step:.05, fmt:v=>v.toFixed(2)+' s'},
+    {k:'roomDamp', label:'吸音',       min:400, max:12000, step:100, fmt:v=>hz(v)},
+    {k:'distance', label:'距離',       min:0, max:1,    step:.01, fmt:v=>v.toFixed(2)}
+  ]},
+  {id:'out', name:'OUT', jp:'出力と揺らぎ', params:[
+    {k:'master',    label:'音量',      min:0, max:1,    step:.01, fmt:v=>v.toFixed(2)},
+    {k:'variation', label:'個体差',    min:0, max:1,    step:.01, fmt:v=>v.toFixed(2)},
+    {k:'rpm',       label:'連射速度',  min:60, max:1400, step:10, fmt:v=>v.toFixed(0)+' rpm'}
+  ]}
+];
+
+const PRESETS = {
+  'ハンドガン 9mm':{crackLevel:.62,crackDecay:.012,crackTone:4200,blastLevel:1,blastDecay:.085,blastCut:3200,blastSweep:.6,blastDrive:.45,bodyLevel:.6,bodyFreq:98,bodyDecay:.16,bodyDrop:.45,mechLevel:.28,mechDelay:.055,mechTone:2900,roomMix:.26,roomSize:1.1,roomDamp:4200,distance:.05,master:.8,variation:.25,rpm:420},
+  'ライフル 5.56':{crackLevel:.95,crackDecay:.008,crackTone:6200,blastLevel:1.15,blastDecay:.06,blastCut:5200,blastSweep:.85,blastDrive:.62,bodyLevel:.5,bodyFreq:120,bodyDecay:.11,bodyDrop:.6,mechLevel:.34,mechDelay:.045,mechTone:3800,roomMix:.34,roomSize:1.6,roomDamp:5200,distance:.12,master:.8,variation:.22,rpm:800},
+  'ショットガン 12番':{crackLevel:.45,crackDecay:.02,crackTone:2600,blastLevel:1.3,blastDecay:.19,blastCut:1500,blastSweep:.45,blastDrive:.7,bodyLevel:1.15,bodyFreq:72,bodyDecay:.3,bodyDrop:.5,mechLevel:.4,mechDelay:.14,mechTone:1800,roomMix:.32,roomSize:1.5,roomDamp:3000,distance:.08,master:.78,variation:.2,rpm:60},
+  'サブマシンガン':{crackLevel:.7,crackDecay:.009,crackTone:5000,blastLevel:.9,blastDecay:.055,blastCut:3800,blastSweep:.7,blastDrive:.5,bodyLevel:.45,bodyFreq:105,bodyDecay:.09,bodyDrop:.5,mechLevel:.45,mechDelay:.035,mechTone:3200,roomMix:.24,roomSize:.9,roomDamp:4600,distance:.05,master:.72,variation:.3,rpm:1100},
+  'サプレッサー':{crackLevel:.18,crackDecay:.014,crackTone:2200,blastLevel:.42,blastDecay:.055,blastCut:900,blastSweep:.3,blastDrive:.2,bodyLevel:.3,bodyFreq:85,bodyDecay:.1,bodyDrop:.4,mechLevel:.6,mechDelay:.04,mechTone:2400,roomMix:.14,roomSize:.6,roomDamp:2400,distance:.03,master:.85,variation:.28,rpm:500},
+  '.50 重機関銃':{crackLevel:.8,crackDecay:.016,crackTone:3400,blastLevel:1.35,blastDecay:.22,blastCut:2200,blastSweep:.75,blastDrive:.8,bodyLevel:1.3,bodyFreq:52,bodyDecay:.42,bodyDrop:.55,mechLevel:.5,mechDelay:.09,mechTone:1500,roomMix:.4,roomSize:2.6,roomDamp:2600,distance:.18,master:.72,variation:.18,rpm:520},
+  '谷間の遠射':{crackLevel:.35,crackDecay:.02,crackTone:1800,blastLevel:.5,blastDecay:.16,blastCut:700,blastSweep:.5,blastDrive:.3,bodyLevel:.6,bodyFreq:64,bodyDecay:.3,bodyDrop:.5,mechLevel:0,mechDelay:.05,mechTone:2000,roomMix:.85,roomSize:3.2,roomDamp:1400,distance:.9,master:.9,variation:.3,rpm:300}
+};
+
+const DEFAULT_PRESET = 'ハンドガン 9mm';
+let P = Object.assign({}, PRESETS[DEFAULT_PRESET]);
+
+function hz(v){ return v>=1000 ? (v/1000).toFixed(v>=10000?0:1)+' kHz' : v.toFixed(0)+' Hz'; }
+
+/* ============ 音声エンジン ============ */
+let ac = null;
+const POOL_SIZE = 5;
+let pool = [];
+let renderToken = 0;
+
+function ctxOut(){
+  if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+  return ac;
+}
+
+function noiseBuffer(ctx, dur){
+  const n = Math.max(1, Math.floor(ctx.sampleRate*dur));
+  const b = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = b.getChannelData(0);
+  for(let i=0;i<n;i++) d[i] = Math.random()*2-1;
+  return b;
+}
+
+function impulse(ctx, size, damp){
+  const n = Math.max(1, Math.floor(ctx.sampleRate*size));
+  const b = ctx.createBuffer(2, n, ctx.sampleRate);
+  const decay = 2.4;
+  for(let c=0;c<2;c++){
+    const d = b.getChannelData(c);
+    let lp = 0;
+    const a = Math.min(1, damp/(ctx.sampleRate*0.5));
+    for(let i=0;i<n;i++){
+      const x = (Math.random()*2-1) * Math.pow(1-i/n, decay);
+      lp += a*(x-lp);
+      d[i] = lp;
+    }
+  }
+  return b;
+}
+
+function driveCurve(amount){
+  const k = amount*80, n = 4096, c = new Float32Array(n);
+  for(let i=0;i<n;i++){ const x = i*2/n - 1; c[i] = (1+k)*x/(1+k*Math.abs(x)); }
+  return c;
+}
+function softClip(){
+  const n = 2048, c = new Float32Array(n);
+  for(let i=0;i<n;i++){ const x = i*2/n - 1; c[i] = Math.tanh(x*1.4)/Math.tanh(1.4); }
+  return c;
+}
+
+function env(param, t, peak, atk, dec){
+  const eps = 1e-4, pk = Math.max(peak, eps*2);
+  param.setValueAtTime(eps, t);
+  param.exponentialRampToValueAtTime(pk, t+atk);
+  param.exponentialRampToValueAtTime(eps, t+atk+dec);
+  param.setValueAtTime(0, t+atk+dec+.002);
+}
+
+function jitter(rng, amt){ return 1 + (rng()*2-1)*amt; }
+
+function shotLength(p){
+  const boom = p.distance*0.14;
+  const tail = p.roomMix>.01 ? p.roomSize*1.05 : .05;
+  const core = Math.max(p.crackDecay*2, p.blastDecay*2.2 + boom, p.bodyDecay*2 + boom, p.mechDelay+.12);
+  return Math.min(6, core + tail + .06);
+}
+
+function renderShot(p, seed){
+  const sr = 44100;
+  const dur = shotLength(p);
+  const ctx = new (window.OfflineAudioContext||window.webkitOfflineAudioContext)(2, Math.ceil(sr*dur), sr);
+  let s = seed>>>0 || 1;
+  const rng = ()=> ((s = (s*1664525+1013904223)>>>0) / 4294967296);
+  const v = p.variation;
+
+  const t = 0.004;
+  const boom = p.distance*0.14;               // 距離による「クラック→轟音」の遅れ
+  const noise = noiseBuffer(ctx, Math.max(0.6, Math.min(dur, 1.2)));
+
+  // 出力段
+  const out = ctx.createGain(); out.gain.value = p.master;
+  const clip = ctx.createWaveShaper(); clip.curve = softClip(); clip.oversample = '2x';
+  const air = ctx.createBiquadFilter(); air.type='lowpass';
+  air.frequency.value = 18000*Math.pow(0.055, p.distance);  // 遠いほど高域が減る
+  clip.connect(air); air.connect(out); out.connect(ctx.destination);
+
+  const dry = ctx.createGain(); dry.gain.value = 1 - p.roomMix*0.35; dry.connect(clip);
+  const send = ctx.createGain(); send.gain.value = p.roomMix;
+
+  if(p.roomMix > 0.005){
+    const rev = ctx.createConvolver(); rev.buffer = impulse(ctx, p.roomSize, p.roomDamp);
+    const damp = ctx.createBiquadFilter(); damp.type='lowpass'; damp.frequency.value = p.roomDamp;
+    const pre = ctx.createDelay(0.2); pre.delayTime.value = 0.006 + p.distance*0.05;
+    send.connect(pre); pre.connect(rev); rev.connect(damp); damp.connect(clip);
+  }
+  const bus = ctx.createGain(); bus.connect(dry); bus.connect(send);
+
+  // 1) CRACK — 超短い高域トランジェント
+  if(p.crackLevel > 0.001){
+    const src = ctx.createBufferSource(); src.buffer = noise; src.playbackRate.value = 1.4;
+    const hp = ctx.createBiquadFilter(); hp.type='highpass';
+    hp.frequency.value = p.crackTone*jitter(rng,.12*v); hp.Q.value = .8;
+    const g = ctx.createGain();
+    env(g.gain, t, p.crackLevel*jitter(rng,.1*v), .0006, p.crackDecay*jitter(rng,.2*v));
+    src.connect(hp); hp.connect(g); g.connect(bus);
+    src.start(t, rng()*0.2);
+  }
+
+  // 2) BLAST — 掃引フィルター＋歪みのノイズ本体
+  if(p.blastLevel > 0.001){
+    const src = ctx.createBufferSource(); src.buffer = noise;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.Q.value = .9 + p.blastSweep*2.5;
+    const cut = p.blastCut*jitter(rng,.12*v);
+    const hi = Math.min(19000, cut*(1+p.blastSweep*4));
+    const lo = Math.max(80, cut*(1-p.blastSweep*.72));
+    lp.frequency.setValueAtTime(hi, t+boom);
+    lp.frequency.exponentialRampToValueAtTime(lo, t+boom+p.blastDecay*.9);
+    const sh = ctx.createWaveShaper(); sh.curve = driveCurve(p.blastDrive); sh.oversample='4x';
+    const pre = ctx.createGain(); pre.gain.value = 1 + p.blastDrive*5;
+    const post = ctx.createGain(); post.gain.value = 1/(1+p.blastDrive*2.6);
+    const g = ctx.createGain();
+    env(g.gain, t+boom, p.blastLevel*jitter(rng,.1*v), .0012, p.blastDecay*jitter(rng,.22*v));
+    src.connect(pre); pre.connect(sh); sh.connect(post); post.connect(lp); lp.connect(g); g.connect(bus);
+    src.start(t+boom, rng()*0.2);
+  }
+
+  // 3) BODY — ピッチが落ちる低域サイン
+  if(p.bodyLevel > 0.001){
+    const f0 = p.bodyFreq*jitter(rng,.08*v);
+    const osc = ctx.createOscillator(); osc.type='sine';
+    osc.frequency.setValueAtTime(f0, t+boom);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(18, f0*(1-p.bodyDrop*.85)), t+boom+p.bodyDecay);
+    const g = ctx.createGain();
+    env(g.gain, t+boom, p.bodyLevel*jitter(rng,.1*v), .0025, p.bodyDecay*jitter(rng,.18*v));
+    osc.connect(g); g.connect(bus);
+    osc.start(t+boom); osc.stop(t+boom+p.bodyDecay+.05);
+  }
+
+  // 4) MECH — 遊底の作動音（2打点）
+  if(p.mechLevel > 0.001){
+    for(let i=0;i<2;i++){
+      const at = t + p.mechDelay*(i?1.75:1)*jitter(rng,.25*v);
+      const src = ctx.createBufferSource(); src.buffer = noise; src.playbackRate.value = 1+rng()*.4;
+      const bp = ctx.createBiquadFilter(); bp.type='bandpass';
+      bp.frequency.value = p.mechTone*(i?1.3:1)*jitter(rng,.2*v); bp.Q.value = 4;
+      const g = ctx.createGain();
+      env(g.gain, at, p.mechLevel*(i?0.55:1)*jitter(rng,.2*v), .0008, .028);
+      src.connect(bp); bp.connect(g); g.connect(bus);
+      src.start(at, rng()*0.2);
+    }
+  }
+
+  return ctx.startRendering();
+}
+
+/* ============ 再生・波形描画 ============ */
+const scope = document.getElementById('scope');
+const g2d = scope.getContext('2d');
+const playhead = document.getElementById('playhead');
+const el = id => document.getElementById(id);
+
+function analyze(buf){
+  const a = buf.getChannelData(0), b = buf.numberOfChannels>1 ? buf.getChannelData(1) : a;
+  let peak=0, sum=0;
+  for(let i=0;i<buf.length;i++){
+    const x = (a[i]+b[i])*.5, ax = Math.abs(x);
+    if(ax>peak) peak = ax;
+    sum += x*x;
+  }
+  return {peak, rms: Math.sqrt(sum/buf.length), dur: buf.duration};
+}
+const dB = v => v<=1e-5 ? '−∞ dB' : (20*Math.log10(v)).toFixed(1)+' dB';
+
+function draw(buf){
+  const dpr = Math.min(2, window.devicePixelRatio||1);
+  const w = scope.clientWidth, h = scope.clientHeight;
+  scope.width = w*dpr; scope.height = h*dpr;
+  g2d.setTransform(dpr,0,0,dpr,0,0);
+  g2d.clearRect(0,0,w,h);
+
+  // 目盛り
+  g2d.strokeStyle = 'rgba(32,68,77,.9)'; g2d.lineWidth = 1;
+  for(let i=1;i<10;i++){ const x = Math.round(w*i/10)+.5; g2d.beginPath(); g2d.moveTo(x,0); g2d.lineTo(x,h); g2d.stroke(); }
+  for(let i=1;i<4;i++){ const y = Math.round(h*i/4)+.5; g2d.beginPath(); g2d.moveTo(0,y); g2d.lineTo(w,y); g2d.stroke(); }
+  g2d.strokeStyle = 'rgba(93,138,147,.85)';
+  g2d.beginPath(); g2d.moveTo(0, Math.round(h/2)+.5); g2d.lineTo(w, Math.round(h/2)+.5); g2d.stroke();
+
+  if(!buf) return;
+  const a = buf.getChannelData(0), b = buf.numberOfChannels>1 ? buf.getChannelData(1) : a;
+  const step = buf.length/w, mid = h/2, amp = h/2 - 3;
+  g2d.strokeStyle = '#be1039'; g2d.lineWidth = 1;
+  g2d.beginPath();
+  for(let x=0;x<w;x++){
+    let lo=1, hi=-1;
+    const s0 = Math.floor(x*step), s1 = Math.min(buf.length, Math.floor((x+1)*step));
+    for(let i=s0;i<s1;i++){ const v=(a[i]+b[i])*.5; if(v<lo)lo=v; if(v>hi)hi=v; }
+    if(s1<=s0){ lo=hi=0; }
+    g2d.moveTo(x+.5, mid - hi*amp);
+    g2d.lineTo(x+.5, mid - lo*amp + .6);
+  }
+  g2d.stroke();
+  el('scopeScale').textContent = (buf.duration*1000).toFixed(0)+' ms 全体表示';
+}
+
+let renderTimer = null;
+function scheduleRender(){
+  clearTimeout(renderTimer);
+  el('rState').textContent = '計算中';
+  el('rState').className = '';
+  renderTimer = setTimeout(rebuild, 110);
+}
+
+function rebuild(){
+  const token = ++renderToken;
+  const p = Object.assign({}, P);
+  const n = p.variation > 0.005 ? POOL_SIZE : 1;
+  let jobs;
+  try{
+    jobs = [];
+    for(let i=0;i<n;i++) jobs.push(renderShot(p, (Date.now()+i*7919) % 4294967295));
+  }catch(e){
+    console.error(e);
+    el('rState').textContent = 'レンダリング失敗'; el('rState').className = 'warn';
+    return;
+  }
+  Promise.all(jobs).then(bufs=>{
+    if(token !== renderToken) return;
+    pool = bufs;
+    draw(bufs[0]);
+    const st = analyze(bufs[0]);
+    el('rDur').textContent = (st.dur*1000).toFixed(0)+' ms';
+    el('rPeak').textContent = dB(st.peak);
+    el('rPeak').className = st.peak>0.995 ? 'warn' : '';
+    el('rRms').textContent = dB(st.rms);
+    el('rState').textContent = '準備完了';
+  }).catch(err=>{
+    console.error(err);
+    el('rState').textContent = 'レンダリング失敗';
+    el('rState').className = 'warn';
+  });
+}
+
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let phRaf = null;
+
+function fireOnce(){
+  if(!pool.length) return;
+  const ctx = ctxOut();
+  if(ctx.state === 'suspended') ctx.resume();
+  const buf = pool[(Math.random()*pool.length)|0];
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  src.connect(ctx.destination);
+  src.start();
+  if(reduceMotion) return;
+  const t0 = performance.now(), ms = buf.duration*1000;
+  cancelAnimationFrame(phRaf);
+  playhead.style.opacity = '1';
+  (function step(){
+    const k = (performance.now()-t0)/ms;
+    if(k>=1){ playhead.style.opacity='0'; return; }
+    playhead.style.left = (k*100)+'%';
+    phRaf = requestAnimationFrame(step);
+  })();
+}
+
+/* ============ 発射モード ============ */
+let mode = 'single', autoTimer = null;
+function startFire(){
+  if(mode === 'single'){ fireOnce(); return; }
+  const gap = 60000/P.rpm;
+  if(mode === 'burst'){
+    for(let i=0;i<3;i++) setTimeout(fireOnce, i*gap);
+    return;
+  }
+  fireOnce();
+  clearInterval(autoTimer);
+  autoTimer = setInterval(fireOnce, gap);
+}
+function stopFire(){ clearInterval(autoTimer); autoTimer = null; }
+
+/* ============ UI 構築 ============ */
+const racks = document.getElementById('racks');
+const inputs = {};
+MODULES.forEach(m=>{
+  const sec = document.createElement('section');
+  sec.className = 'mod';
+  const head = document.createElement('div');
+  head.className = 'mod-head';
+  head.innerHTML = '<h2>'+m.name+'</h2><span>'+m.jp+'</span>';
+  sec.appendChild(head);
+  m.params.forEach(pd=>{
+    const row = document.createElement('label');
+    row.className = 'param';
+    const name = document.createElement('span'); name.className='name'; name.textContent = pd.label;
+    const inp = document.createElement('input');
+    inp.type='range'; inp.min=pd.min; inp.max=pd.max; inp.step=pd.step; inp.value=P[pd.k];
+    const val = document.createElement('span'); val.className='val'; val.textContent = pd.fmt(P[pd.k]);
+    inp.addEventListener('input', ()=>{
+      P[pd.k] = parseFloat(inp.value);
+      val.textContent = pd.fmt(P[pd.k]);
+      clearPresetSelection();
+      scheduleRender();
+    });
+    inputs[pd.k] = {inp, val, fmt: pd.fmt};
+    row.append(name, inp, val);
+    sec.appendChild(row);
+  });
+  racks.appendChild(sec);
+});
+
+function syncInputs(){
+  Object.keys(inputs).forEach(k=>{
+    inputs[k].inp.value = P[k];
+    inputs[k].val.textContent = inputs[k].fmt(P[k]);
+  });
+}
+
+const chips = document.getElementById('presets');
+Object.keys(PRESETS).forEach(name=>{
+  const b = document.createElement('button');
+  b.textContent = name;
+  b.setAttribute('aria-pressed', String(name === DEFAULT_PRESET));
+  b.addEventListener('click', ()=>{
+    P = Object.assign({}, PRESETS[name]);
+    syncInputs();
+    [].forEach.call(chips.children, c=>c.setAttribute('aria-pressed', String(c === b)));
+    scheduleRender();
+  });
+  chips.appendChild(b);
+});
+function clearPresetSelection(){
+  [].forEach.call(chips.children, c=>c.setAttribute('aria-pressed','false'));
+}
+
+document.getElementById('modes').addEventListener('click', e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  mode = b.dataset.mode;
+  [].forEach.call(e.currentTarget.children, c=>c.setAttribute('aria-pressed', String(c===b)));
+});
+
+const fireBtn = document.getElementById('fire');
+fireBtn.addEventListener('pointerdown', e=>{ e.preventDefault(); startFire(); });
+['pointerup','pointerleave','pointercancel'].forEach(ev=>fireBtn.addEventListener(ev, stopFire));
+fireBtn.addEventListener('click', e=>{ if(e.detail===0) startFire(); });
+document.addEventListener('keydown', e=>{
+  if(e.code==='Space' && !e.repeat && !/input|button/i.test(e.target.tagName)){ e.preventDefault(); startFire(); }
+});
+document.addEventListener('keyup', e=>{ if(e.code==='Space') stopFire(); });
+
+document.getElementById('reset').addEventListener('click', ()=>{
+  P = Object.assign({}, PRESETS[DEFAULT_PRESET]);
+  syncInputs();
+  [].forEach.call(chips.children, c=>c.setAttribute('aria-pressed', String(c.textContent===DEFAULT_PRESET)));
+  scheduleRender();
+});
+
+/* ============ WAV 書き出し ============ */
+function encodeWAV(buf){
+  const ch = buf.numberOfChannels, len = buf.length, sr = buf.sampleRate;
+  const size = 44 + len*ch*2;
+  const ab = new ArrayBuffer(size), view = new DataView(ab);
+  const str = (o,s)=>{ for(let i=0;i<s.length;i++) view.setUint8(o+i, s.charCodeAt(i)); };
+  str(0,'RIFF'); view.setUint32(4, size-8, true); str(8,'WAVE');
+  str(12,'fmt '); view.setUint32(16,16,true); view.setUint16(20,1,true);
+  view.setUint16(22,ch,true); view.setUint32(24,sr,true);
+  view.setUint32(28, sr*ch*2, true); view.setUint16(32, ch*2, true); view.setUint16(34,16,true);
+  str(36,'data'); view.setUint32(40, len*ch*2, true);
+  const data = []; for(let c=0;c<ch;c++) data.push(buf.getChannelData(c));
+  let off = 44;
+  for(let i=0;i<len;i++) for(let c=0;c<ch;c++){
+    let v = Math.max(-1, Math.min(1, data[c][i]));
+    view.setInt16(off, v<0 ? v*0x8000 : v*0x7fff, true); off += 2;
+  }
+  return new Blob([ab], {type:'audio/wav'});
+}
+
+document.getElementById('export').addEventListener('click', ()=>{
+  el('rState').textContent = '書き出し中';
+  renderShot(Object.assign({}, P), (Date.now()%4294967295)).then(buf=>{
+    const url = URL.createObjectURL(encodeWAV(buf));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'gunshot_'+Date.now()+'.wav';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 4000);
+    el('rState').textContent = '書き出し完了';
+  }).catch(()=>{ el('rState').textContent='書き出し失敗'; el('rState').className='warn'; });
+});
+
+window.addEventListener('resize', ()=>{ if(pool.length) draw(pool[0]); });
+rebuild();
+})();
+</script>
+</body>
+</html>
